@@ -1,0 +1,83 @@
+# YouTube for Meta Ray-Ban Display
+
+A YouTube app for the 600×600 display on **Meta Ray-Ban Display** glasses. Search by voice or handwriting, browse trending videos, and watch with swipe and pinch controls.
+
+## Using it
+
+**Home**
+- **Search box:** pinch it to dictate or handwrite. Results appear as soon as you finish.
+- **🔥 Hot:** what's trending on YouTube right now.
+- **🕘 Recent:** videos you've watched.
+- **★ Saved:** videos you've starred.
+- **Swipe ← / →** along the top row, **↓ / ↑** through the videos, and **pinch** to play.
+- **Swipe → on a video** to save it (★), or again to unsave it.
+
+**Player**
+- **Pinch:** play / pause
+- **Swipe ← / →:** back / forward 10 seconds
+- **Swipe ↑ / ↓:** volume
+- **Back gesture:** return to the list
+
+When a video ends, the next one in the list plays automatically.
+
+## How it works
+
+```
+Glasses (web app)  ──HTTPS──▶  server.js  ──▶  YouTube Data API (search, trending)
+      │                        holds your API key
+      └──▶ YouTube's official embedded player (playback)
+```
+
+Search and trending go through the server, so your YouTube API key never reaches the glasses. Playback uses YouTube's official embedded player with its on-screen controls hidden. The glasses' swipes and pinches drive it through YouTube's player API. Recent and Saved are stored on the glasses.
+
+## 1. Get a YouTube API key (free)
+
+1. Go to https://console.cloud.google.com/ and create a project (any name).
+2. Open **APIs & Services → Library**, search for **YouTube Data API v3**, and click **Enable**.
+3. Open **APIs & Services → Credentials → Create credentials → API key**, then copy the key.
+4. Optional but recommended: click the key, and under **API restrictions** choose **Restrict key → YouTube Data API v3**.
+
+The free quota is 10,000 units a day. A search costs about 100 units, so that's roughly **100 searches a day**. Repeat searches within 30 minutes are cached and cost nothing. The Hot tab costs almost nothing.
+
+## 2. Deploy on Vercel
+
+1. Go to https://vercel.com/new and import `GalacTechNyc/youtube`. Leave the framework as **Other** and the build settings empty.
+2. Add environment variables:
+   - `YOUTUBE_API_KEY`: the key from step 1
+   - `ACCESS_TOKEN`: a long passcode you make up, so strangers can't use up your quota
+   - `REGION` (optional): country for the Hot tab, e.g. `US`, `GB`, `CA`
+3. Click **Deploy**. Check `https://<your-project>.vercel.app/api/health`: `apiKey` and `locked` should both be `true`.
+
+If the glasses show a Vercel login page, turn it off in **Settings → Deployment Protection**.
+
+## 3. Add it to your glasses
+
+In the Meta AI app, go to **Settings → App Connections → Web Apps → Add a Web App**, name it `YouTube`, and enter:
+
+```
+https://<your-project>.vercel.app/?key=YOUR_ACCESS_TOKEN
+```
+
+Developer Mode must be on first: **Settings → App Info**, then tap **App version** 5 times.
+
+## Settings
+
+| Variable | Default | What it does |
+|---|---|---|
+| `YOUTUBE_API_KEY` | — | **Required.** YouTube Data API v3 key. |
+| `ACCESS_TOKEN` | *(none)* | Passcode the glasses must send. **Set this.** |
+| `REGION` | `US` | Country code for trending videos and search ranking. |
+
+## Run locally
+
+```bash
+cp .env.example .env   # add YOUTUBE_API_KEY
+npm start              # http://localhost:3000, no packages to install
+```
+
+In a desktop browser, the arrow keys, Enter and Escape stand in for the glasses' swipes, pinch and back gesture. The [Meta Ray-Ban Display Simulator](https://chromewebstore.google.com/detail/meta-ray-ban-display-simu/jpjlmmodokemlepklkdbimceggpbjcll) Chrome extension previews the real display.
+
+## Notes
+
+- Some videos don't allow embedding. Search already filters those out, and the player says "This video can't play here" if one slips through.
+- YouTube's terms require its player to stay visible, so this app plays video, not audio only.

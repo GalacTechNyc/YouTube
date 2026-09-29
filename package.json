@@ -1,0 +1,14 @@
+{
+  "name": "glasses-youtube",
+  "version": "1.0.0",
+  "description": "YouTube for Meta Ray-Ban Display glasses",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "check": "node --check server.js && node --check public/app.js && node --check public/sw.js"
+  },
+  "engines": {
+    "node": ">=22.9"
+  }
+}
