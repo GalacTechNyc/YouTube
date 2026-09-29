@@ -12,6 +12,7 @@ A YouTube app for the 600×600 display on **Meta Ray-Ban Display** glasses. Sear
 - **Swipe ← / →** along the top row, **↓ / ↑** through the list, and **pinch** to open or play.
 - **Swipe → on a video** to save it (★), or again to unsave it.
 - **Back gesture** inside a playlist or list returns to Library.
+- **⚙ Video quality** (in Library): pinch to cycle through Data saver (~240p), Auto (~360p), HD (~720p) and Full HD (~1080p). The player shows the resolution it's actually playing.
 
 **Signing in:** in Subs or Library, pinch **Sign in with Google**. The glasses show a code. On your phone, go to **google.com/device**, enter the code and approve. You never type a password on the glasses. To sign out, pinch your account in Library twice.
 
@@ -97,3 +98,4 @@ In a desktop browser, the arrow keys, Enter and Escape stand in for the glasses'
 
 - Some videos don't allow embedding. Search already filters those out, and the player says "This video can't play here" if one slips through.
 - YouTube's terms require its player to stay visible, so this app plays video, not audio only.
+- YouTube's embed API no longer lets apps pick a resolution directly. The quality setting works by rendering the player at that size (for example 1920×1080) and scaling it down to fit, because YouTube picks the stream to match the player's size. The display is 600 px wide, so HD and Full HD mostly mean slightly sharper text at the cost of more data.

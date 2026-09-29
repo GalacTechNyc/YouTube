@@ -149,8 +149,8 @@ textarea::placeholder { color: var(--dim); }
 
 /* --- Player --------------------------------------------------------------- */
 .player { height: 600px; display: flex; flex-direction: column; outline: none; }
-.frame { width: 600px; height: 338px; flex: none; background: #000; }
-.frame iframe { width: 600px; height: 338px; border: 0; display: block; }
+.frame { width: 600px; height: 338px; flex: none; background: #000; overflow: hidden; }
+.frame iframe { border: 0; display: block; } /* sized and scaled in app.js for the chosen quality */
 .info { padding: 14px 28px 0; display: flex; flex-direction: column; gap: 10px; }
 .title {
   margin: 0;

@@ -138,8 +138,18 @@
       { icon: "🕘", title: "Recent", sub: `${recent.length} watched`, run: () => showVideoList(recent, "Recently watched", "Nothing watched yet.") },
       { icon: "★", title: "Saved", sub: `${saved.length} saved · swipe → on a video to save`, run: () => showVideoList(saved, "Saved", "Swipe → on a video to save it.") },
     ];
+    const q = quality();
+    const qualityEntry = {
+      icon: "⚙",
+      title: `Video quality: ${q.label}`,
+      sub: `${q.note} · pinch to change`,
+      run: () => {
+        cycleQuality();
+        showLibrary(true, lastMenuIndex);
+      },
+    };
     if (!session) {
-      showMenu("Library", [...entries, ...signInEntries("See your playlists and liked videos")], focusList, focusIndex);
+      showMenu("Library", [...entries, qualityEntry, ...signInEntries("See your playlists and liked videos")], focusList, focusIndex);
       return;
     }
     entries.push({ icon: "👍", title: "Liked videos", sub: "Videos you've liked", run: () => loadVideos("api/me/liked", "Liked videos", "No liked videos.", { focus: true, backTo: returnToLibrary }) });
@@ -150,7 +160,7 @@
       confirm: true,
       run: signOut,
     };
-    showMenu("Library", [...entries, accountEntry], focusList, focusIndex);
+    showMenu("Library", [...entries, qualityEntry, accountEntry], focusList, focusIndex);
     // Playlists load in after the fixed entries.
     const seq = loadSeq;
     try {
@@ -163,7 +173,7 @@
         run: () => loadVideos(`api/me/playlist?id=${encodeURIComponent(pl.id)}`, pl.title, "This playlist is empty.", { focus: true, backTo: returnToLibrary }),
       }));
       const focused = [...listEl.children].indexOf(document.activeElement);
-      showMenu("Library", [...entries, ...lists, accountEntry], false);
+      showMenu("Library", [...entries, ...lists, qualityEntry, accountEntry], false);
       if (focused >= 0) listEl.children[Math.min(focused, listEl.children.length - 1)].focus();
     } catch (err) {
       setStatus(err.message, "error");
@@ -384,6 +394,38 @@
   let notice = "";
   let volume = store.get("volume", 80);
 
+  // YouTube's embed API no longer lets apps pick a resolution; the player chooses one
+  // from its own pixel size. So the iframe is rendered at the size for the wanted
+  // quality and scaled to fit the 600x338 frame.
+  const QUALITIES = [
+    { key: "saver", label: "Data saver", note: "~240p · least data", w: 426, h: 240 },
+    { key: "auto", label: "Auto", note: "~360p", w: 600, h: 338 },
+    { key: "hd", label: "HD", note: "~720p · more data", w: 1280, h: 720 },
+    { key: "fhd", label: "Full HD", note: "~1080p · most data", w: 1920, h: 1080 },
+  ];
+  let qualityKey = store.get("quality", "auto");
+  const quality = () => QUALITIES.find((q) => q.key === qualityKey) || QUALITIES[1];
+
+  function applyQuality() {
+    const q = quality();
+    const frame = player && playerReady ? player.getIframe() : null;
+    if (!frame) return;
+    frame.style.width = `${q.w}px`;
+    frame.style.height = `${q.h}px`;
+    frame.style.transformOrigin = "0 0";
+    frame.style.transform = `scale(${600 / q.w})`;
+    player.setSize(q.w, q.h);
+  }
+
+  function cycleQuality() {
+    const i = QUALITIES.findIndex((q) => q.key === qualityKey);
+    qualityKey = QUALITIES[(i + 1) % QUALITIES.length].key;
+    store.set("quality", qualityKey);
+    applyQuality();
+  }
+
+  const QUALITY_NAMES = { tiny: "144p", small: "240p", medium: "360p", large: "480p", hd720: "720p", hd1080: "1080p", hd1440: "1440p", hd2160: "4K", highres: "4K+" };
+
   function loadYouTubeApi() {
     if (!ytApi) {
       ytApi = new Promise((resolve, reject) => {
@@ -404,7 +446,8 @@
     progressEl.style.width = dur ? `${Math.min(100, (cur / dur) * 100)}%` : "0";
     const state = player.getPlayerState();
     const icon = state === 1 ? "▶" : state === 3 ? "…" : "⏸";
-    metaEl.textContent = notice || `${icon}  ${fmtTime(cur)} / ${fmtTime(dur)}   ·   Vol ${volume}`;
+    const res = QUALITY_NAMES[player.getPlaybackQuality?.()] || "";
+    metaEl.textContent = notice || `${icon}  ${fmtTime(cur)} / ${fmtTime(dur)}   ·   Vol ${volume}${res ? `   ·   ${res}` : ""}`;
   }
 
   function flash(text, ms = 1500) {
@@ -443,14 +486,15 @@
       const YT = await loadYouTubeApi();
       if (player) return; // created while we waited; onReady plays the current video
       player = new YT.Player("ytPlayer", {
-        width: 600,
-        height: 338,
+        width: quality().w,
+        height: quality().h,
         videoId: v.id,
         playerVars: { autoplay: 1, playsinline: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, iv_load_policy: 3, origin: location.origin },
         events: {
           onReady: (e) => {
             playerReady = true;
             const frame = e.target.getIframe();
+            applyQuality();
             frame.setAttribute("tabindex", "-1");
             frame.setAttribute("allow", "autoplay; encrypted-media");
             e.target.setVolume(volume);
