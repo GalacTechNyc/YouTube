@@ -6,6 +6,7 @@ A YouTube app for the 600×600 display on **Meta Ray-Ban Display** glasses. Sear
 
 **Home**
 - **Search box:** pinch it to dictate or handwrite. Results appear as soon as you finish.
+- **✨ For you:** picks based on what you watch, save and like. It mixes new uploads from your most-watched channels with trending videos in your favorite categories, and opens by default once you've watched a few.
 - **🔥 Hot:** what's trending on YouTube right now.
 - **📺 Subs:** the newest uploads from channels you subscribe to (after signing in).
 - **📚 Library:** 🕘 Recent, ★ Saved, and, once signed in, 👍 Liked videos, your 📂 playlists and your account.
@@ -95,6 +96,9 @@ npm start              # http://localhost:3000, no packages to install
 In a desktop browser, the arrow keys, Enter and Escape stand in for the glasses' swipes, pinch and back gesture. The [Meta Ray-Ban Display Simulator](https://chromewebstore.google.com/detail/meta-ray-ban-display-simu/jpjlmmodokemlepklkdbimceggpbjcll) Chrome extension previews the real display.
 
 ## Notes
+
+- **Why For you isn't YouTube's own "Recommended":** YouTube's API no longer gives apps your home-feed recommendations or related videos, so this app builds its own from your activity. It costs about 10 quota units and uses no searches.
+- **Speed:** YouTube's player loads in the background at launch, and resting on a video for half a second preloads it, so a pinch starts it right away. For you, Hot, Subs and Liked show last time's list instantly while a fresh one loads. Data saver quality starts fastest.
 
 - Some videos don't allow embedding. Search already filters those out, and the player says "This video can't play here" if one slips through.
 - YouTube's terms require its player to stay visible, so this app plays video, not audio only.

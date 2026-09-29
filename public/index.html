@@ -7,6 +7,10 @@
   <meta name="description" content="Watch YouTube on your Meta Ray-Ban Display glasses">
   <meta name="theme-color" content="#000000">
   <title>YouTube</title>
+  <link rel="preconnect" href="https://www.youtube.com">
+  <link rel="preconnect" href="https://i.ytimg.com">
+  <link rel="preconnect" href="https://www.google.com">
+  <link rel="dns-prefetch" href="https://googlevideo.com">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -18,6 +22,7 @@
 
     <div class="top">
       <textarea id="search" class="focusable" rows="1" placeholder="Search…" aria-label="Search YouTube"></textarea>
+      <button id="tabForYou" class="focusable tab" data-tab="foryou"><span class="ico">✨</span><span class="lbl">For you</span></button>
       <button id="tabHot" class="focusable tab" data-tab="hot"><span class="ico">🔥</span><span class="lbl">Hot</span></button>
       <button id="tabSubs" class="focusable tab" data-tab="subs"><span class="ico">📺</span><span class="lbl">Subs</span></button>
       <button id="tabLibrary" class="focusable tab" data-tab="library"><span class="ico">📚</span><span class="lbl">Library</span></button>

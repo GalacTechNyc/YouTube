@@ -59,7 +59,7 @@ header {
   box-shadow: 0 0 0 3px rgba(127, 212, 255, 0.35);
 }
 
-.top { display: flex; gap: 10px; height: 88px; flex: none; }
+.top { display: flex; gap: 8px; height: 88px; flex: none; }
 textarea {
   flex: 1;
   min-width: 0;
@@ -72,7 +72,7 @@ textarea {
 }
 textarea::placeholder { color: var(--dim); }
 .tab {
-  width: 76px;
+  width: 78px;
   padding: 0;
   cursor: pointer;
   display: flex;
@@ -82,7 +82,7 @@ textarea::placeholder { color: var(--dim); }
   gap: 2px;
 }
 .tab .ico { font-size: 26px; line-height: 1; }
-.tab .lbl { font-size: 17px; font-weight: 600; }
+.tab .lbl { font-size: 16px; font-weight: 600; white-space: nowrap; }
 .tab.active { color: var(--accent); border-color: var(--accent); }
 .tab.active:focus { border-color: var(--focus); }
 
@@ -166,3 +166,13 @@ textarea::placeholder { color: var(--dim); }
 .progress { height: 100%; width: 0; background: var(--accent); }
 .meta { margin: 0; font-size: 22px; }
 .hint { margin: 0; font-size: 18px; color: var(--dim); }
+
+/* While browsing, keep the player rendered off-screen (not display:none) so it can
+   warm up and pre-load; it's silent and invisible until a video is opened. */
+#player[hidden] {
+  display: flex !important;
+  position: fixed;
+  top: 0;
+  left: -2000px;
+  pointer-events: none;
+}

@@ -1,6 +1,6 @@
 // Network-first for the app shell so updates show up immediately, with a
 // cached copy for when the connection drops. API and YouTube requests are never cached.
-const CACHE = "glasses-youtube-v3";
+const CACHE = "glasses-youtube-v4";
 const SHELL = ["./", "index.html", "style.css", "app.js"];
 
 self.addEventListener("install", (e) => {

@@ -11,7 +11,7 @@
   const homeEl = $("home");
   const statusEl = $("status");
   const searchEl = $("search");
-  const tabs = [$("tabHot"), $("tabSubs"), $("tabLibrary")];
+  const tabs = [$("tabForYou"), $("tabHot"), $("tabSubs"), $("tabLibrary")];
   const listTitleEl = $("listTitle");
   const listEl = $("list");
   const emptyEl = $("empty");
@@ -84,20 +84,44 @@
   }
 
   // Loads a list of videos into the list area, ignoring results that arrive after the user moved on.
+  // Feeds worth showing instantly from last time, then refreshing in the background.
+  const CACHEABLE = /^api\/(trending|foryou|me\/(subs|liked))$/;
   let loadSeq = 0;
   async function loadVideos(path, label, emptyText, { focus = false, backTo = null } = {}) {
     const seq = ++loadSeq;
     back = backTo;
-    showList([], label, "", false);
-    setStatus("Loading…", "busy");
+    const basePath = path.split("?")[0];
+    const cacheKey = CACHEABLE.test(basePath) ? `list:${basePath}` : null;
+    const cachedList = cacheKey ? store.get(cacheKey, null) : null;
+    if (cachedList && cachedList.length) {
+      showList(cachedList, label, emptyText, focus);
+      setStatus("Updating…", "busy");
+    } else {
+      showList([], label, "", false);
+      setStatus("Loading…", "busy");
+    }
     try {
       const { videos: found } = await api(path);
       if (seq !== loadSeq) return;
-      setStatus("");
-      showList(found, label, emptyText, focus);
+      if (cacheKey) store.set(cacheKey, found);
+      const focusedIndex = [...listEl.children].indexOf(document.activeElement);
+      const sameList = cachedList && cachedList.length === found.length && cachedList.every((v, i) => v.id === found[i].id);
+      if (!sameList) {
+        showList(found, label, emptyText, focus && focusedIndex < 0 && !cachedList);
+        if (focusedIndex >= 0 && listEl.children.length) listEl.children[Math.min(focusedIndex, listEl.children.length - 1)].focus();
+        else if (focus && cachedList && listEl.children.length) listEl.children[0].focus();
+      }
+      if (statusEl.textContent === "Updating…" || statusEl.textContent === "Loading…") setStatus("");
     } catch (err) {
-      if (seq === loadSeq) setStatus(err.message, "error");
+      if (seq === loadSeq) setStatus(cachedList ? "Offline · showing last list" : err.message, "error");
     }
+  }
+
+  // What For you is based on: the latest videos watched and saved in this app.
+  function forYouSeeds() {
+    const ids = [];
+    for (const v of [...recent.slice(0, 12), ...saved.slice(0, 8)]) if (!ids.includes(v.id)) ids.push(v.id);
+    return ids.slice(0, 20);
   }
 
   function loadTab(name, { focusList = false } = {}) {
@@ -106,6 +130,14 @@
     back = null;
     tabs.forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
     if (name === "hot") return loadVideos("api/trending", "Trending now", "Nothing trending right now.", { focus: focusList });
+    if (name === "foryou") {
+      const seeds = forYouSeeds();
+      if (!seeds.length && !session) {
+        showList([], "For you", "Watch or save a few videos (or sign in) and this fills with picks for you.", false);
+        return;
+      }
+      return loadVideos(`api/foryou?seeds=${seeds.join(",")}`, "Picked for you", "Nothing yet. Watch a few more videos.", { focus: focusList });
+    }
     if (name === "subs") {
       if (!session) {
         return showMenu("Subscriptions", signInEntries("Sign in to see your subscriptions"), focusList);
@@ -257,6 +289,7 @@
   }
 
   function signOutLocally() {
+    for (const k of ["list:api/me/subs", "list:api/me/liked", "list:api/foryou"]) store.set(k, null);
     session = "";
     accountName = "";
     store.set("googleSession", "");
@@ -369,7 +402,10 @@
     text.append(t, c);
     item.append(thumb, text);
     item.addEventListener("click", () => play(i));
-    item.addEventListener("focus", () => setStatus(isSaved(v.id) ? "→ unsave" : "→ save"));
+    item.addEventListener("focus", () => {
+      setStatus(isSaved(v.id) ? "→ unsave" : "→ save");
+      precue(v);
+    });
     return item;
   }
 
@@ -463,9 +499,63 @@
     store.set("recent", recent);
   }
 
+  // Creates the (hidden) player once. Called at launch so the first pinch is fast.
+  let playerPromise = null;
+  let cuedId = null;
+  function ensurePlayer() {
+    if (!playerPromise) {
+      playerPromise = loadYouTubeApi().then(
+        (YT) =>
+          new Promise((resolve) => {
+            player = new YT.Player("ytPlayer", {
+              width: quality().w,
+              height: quality().h,
+              playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, iv_load_policy: 3, origin: location.origin },
+              events: {
+                onReady: (e) => {
+                  playerReady = true;
+                  const frame = e.target.getIframe();
+                  frame.setAttribute("tabindex", "-1");
+                  frame.setAttribute("allow", "autoplay; encrypted-media");
+                  applyQuality();
+                  e.target.setVolume(volume);
+                  resolve(e.target);
+                },
+                onStateChange: (e) => {
+                  // Autoplay the next video in the list when one ends.
+                  if (e.data === 0 && view === "player" && current + 1 < videos.length) play(current + 1);
+                },
+                onError: (e) => {
+                  if (view !== "player") return; // a failed pre-load while browsing is harmless
+                  flash(e.data === 101 || e.data === 150 ? "This video can't play here" : "Couldn't play this video", 3000);
+                },
+              },
+            });
+          }),
+      );
+      playerPromise.catch(() => { playerPromise = null; });
+    }
+    return playerPromise;
+  }
+
+  // While browsing, pre-load the video you're resting on so a pinch starts it at once.
+  let cueTimer = null;
+  function precue(v) {
+    clearTimeout(cueTimer);
+    if (!v || v.live) return;
+    cueTimer = setTimeout(() => {
+      if (view !== "home" || !playerReady || cuedId === v.id) return;
+      try {
+        player.cueVideoById(v.id);
+        cuedId = v.id;
+      } catch { /* ignore */ }
+    }, 600);
+  }
+
   async function play(i) {
     const v = videos[i];
     if (!v) return;
+    clearTimeout(cueTimer);
     current = i;
     view = "player";
     homeEl.hidden = true;
@@ -477,45 +567,19 @@
     remember(v);
     clearInterval(timer);
     timer = setInterval(renderMeta, 500);
-
-    if (player && playerReady) {
-      player.loadVideoById(v.id);
-      return;
-    }
     renderMeta();
+
     try {
-      const YT = await loadYouTubeApi();
-      if (player) return; // created while we waited; onReady plays the current video
-      player = new YT.Player("ytPlayer", {
-        width: quality().w,
-        height: quality().h,
-        videoId: v.id,
-        playerVars: { autoplay: 1, playsinline: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, iv_load_policy: 3, origin: location.origin },
-        events: {
-          onReady: (e) => {
-            playerReady = true;
-            const frame = e.target.getIframe();
-            applyQuality();
-            frame.setAttribute("tabindex", "-1");
-            frame.setAttribute("allow", "autoplay; encrypted-media");
-            e.target.setVolume(volume);
-            if (videos[current].id !== v.id) e.target.loadVideoById(videos[current].id);
-            else e.target.playVideo();
-            playerEl.focus();
-            // If the browser blocked autoplay with sound, ask for a pinch.
-            setTimeout(() => {
-              if (view === "player" && ![1, 3].includes(e.target.getPlayerState())) flash("Pinch to play", 4000);
-            }, 2500);
-          },
-          onStateChange: (e) => {
-            // Autoplay the next video in the list when one ends.
-            if (e.data === 0 && view === "player" && current + 1 < videos.length) play(current + 1);
-          },
-          onError: (e) => {
-            flash(e.data === 101 || e.data === 150 ? "This video can't play here" : "Couldn't play this video", 3000);
-          },
-        },
-      });
+      const p = await ensurePlayer();
+      if (view !== "player" || videos[current]?.id !== v.id) return; // user moved on while it loaded
+      if (cuedId === v.id) p.playVideo();
+      else p.loadVideoById(v.id);
+      cuedId = null;
+      playerEl.focus();
+      // If the browser blocked autoplay with sound, ask for a pinch.
+      setTimeout(() => {
+        if (view === "player" && videos[current]?.id === v.id && ![1, 3].includes(p.getPlayerState())) flash("Pinch to play", 4000);
+      }, 2500);
     } catch (err) {
       flash(err.message || "Couldn't load YouTube", 4000);
     }
@@ -649,8 +713,10 @@
     .then((r) => r.json())
     .then((h) => { signInAvailable = Boolean(h.signIn); if (tab !== "hot" && menu) loadTab(tab); })
     .catch(() => {});
-  loadTab("hot");
+  loadTab(forYouSeeds().length || session ? "foryou" : "hot");
   searchEl.focus();
+  // Load YouTube's player in the background so the first video starts quickly.
+  setTimeout(() => ensurePlayer().catch(() => {}), 1200);
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});

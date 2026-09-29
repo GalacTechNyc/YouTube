@@ -275,6 +275,74 @@ async function handleAccount(req, res, url) {
   sendJson(res, 404, { error: "Not found" });
 }
 
+// --- For you -----------------------------------------------------------------
+// YouTube's API no longer exposes personal recommendations or "related videos", so
+// this builds a feed from the wearer's own signals: videos watched/saved in the app
+// (sent by the glasses) plus liked videos when signed in. It mixes new uploads from
+// the channels they watch most with trending videos in their favourite categories.
+// Costs ~10 quota units (no search calls).
+async function forYou(seedIds, req) {
+  let token = null;
+  let userKey = "anon";
+  if (signInEnabled() && req.headers["x-google-session"]) {
+    try {
+      ({ token, key: userKey } = await accessTokenFor(req));
+    } catch { /* fall back to the in-app signals only */ }
+  }
+  return cached(`fy:${userKey}:${seedIds.join(",")}`, 20 * 60 * 1000, async () => {
+    const seeds = [];
+    if (seedIds.length) seeds.push(...(await yt("videos", { part: "snippet", id: seedIds.join(",") })).items);
+    if (token) {
+      const liked = await yt("videos", { part: "snippet", myRating: "like", maxResults: "25" }, token).catch(() => ({ items: [] }));
+      seeds.push(...liked.items);
+    }
+    if (!seeds.length) return [];
+
+    const tally = (key) => {
+      const counts = new Map();
+      for (const v of seeds) {
+        const k = key(v);
+        if (k) counts.set(k, (counts.get(k) || 0) + 1);
+      }
+      return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+    };
+    const channels = tally((v) => v.snippet?.channelId).slice(0, 6);
+    const categories = tally((v) => v.snippet?.categoryId).slice(0, 3);
+
+    const [uploads, popular] = await Promise.all([
+      Promise.all(
+        channels.map((ch) =>
+          yt("playlistItems", { part: "contentDetails", playlistId: "UU" + ch.slice(2), maxResults: "4" })
+            .then((d) => d.items.map((i) => i.contentDetails?.videoId))
+            .catch(() => []),
+        ),
+      ),
+      Promise.all(
+        categories.map((cat) =>
+          yt("videos", { part: "id", chart: "mostPopular", regionCode: REGION, videoCategoryId: cat, maxResults: "8" })
+            .then((d) => d.items.map((i) => i.id))
+            .catch(() => []), // some categories have no chart
+        ),
+      ),
+    ]);
+
+    // Interleave: one from each channel, one from each category, repeat.
+    const seen = new Set(seeds.map((v) => v.id));
+    const picked = [];
+    const lanes = [...uploads, ...popular];
+    for (let round = 0; picked.length < 30 && lanes.some((l) => l.length > round); round++) {
+      for (const lane of lanes) {
+        const id = lane[round];
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          picked.push(id);
+        }
+      }
+    }
+    return details(picked.slice(0, 30));
+  });
+}
+
 async function handleApi(req, res, url) {
   if (url.pathname === "/api/health") {
     return sendJson(res, 200, {
@@ -305,6 +373,13 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { videos: await search(q) });
     }
     if (url.pathname === "/api/trending") return sendJson(res, 200, { videos: await trending() });
+    if (url.pathname === "/api/foryou") {
+      const seeds = (url.searchParams.get("seeds") || "")
+        .split(",")
+        .filter((id) => /^[A-Za-z0-9_-]{11}$/.test(id))
+        .slice(0, 20);
+      return sendJson(res, 200, { videos: await forYou(seeds, req) });
+    }
   } catch (err) {
     console.error("YouTube API error:", err);
     return sendJson(res, err.status === 403 || err.status === 400 ? 502 : 500, { error: err.message || "YouTube error" });
