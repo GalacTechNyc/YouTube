@@ -11,10 +11,14 @@
   const homeEl = $("home");
   const statusEl = $("status");
   const searchEl = $("search");
-  const tabs = [$("tabHot"), $("tabRecent"), $("tabSaved")];
+  const tabs = [$("tabHot"), $("tabSubs"), $("tabLibrary")];
   const listTitleEl = $("listTitle");
   const listEl = $("list");
   const emptyEl = $("empty");
+  const signinEl = $("signin");
+  const signinUrlEl = $("signinUrl");
+  const signinCodeEl = $("signinCode");
+  const signinNoteEl = $("signinNote");
   const playerEl = $("player");
   const titleEl = $("title");
   const progressEl = $("progress");
@@ -41,9 +45,13 @@
 
   let recent = store.get("recent", []); // [{id,title,channel,seconds,live}]
   let saved = store.get("saved", []);
+  let session = store.get("googleSession", ""); // sealed Google sign-in, only this server can open it
+  let accountName = store.get("accountName", "");
+  let signInAvailable = false;
   let tab = "hot";
-  let videos = []; // the list currently shown
-  let listLabel = "";
+  let videos = []; // the videos currently listed (empty while a menu is shown)
+  let menu = null; // [{icon, title, sub, run}] while a menu is shown
+  let back = null; // what the back gesture does inside a sub-list (e.g. a playlist)
   let view = "home";
 
   function setStatus(text, kind = "") {
@@ -61,60 +69,258 @@
 
   // --- Data ------------------------------------------------------------------
 
-  async function api(path) {
-    const res = await fetch(path, { headers: { "X-Access-Token": accessKey } });
+  async function api(path, options = {}) {
+    const headers = { "X-Access-Token": accessKey, ...(session ? { "X-Google-Session": session } : {}) };
+    if (options.body) headers["Content-Type"] = "application/json";
+    const res = await fetch(path, { ...options, headers });
     const body = await res.json().catch(() => ({}));
+    if (res.status === 401 && body.signedOut) {
+      signOutLocally();
+      throw new Error(body.error || "Signed out");
+    }
     if (res.status === 401) throw new Error("Wrong access key");
     if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
     return body;
   }
 
-  async function loadTab(name, { focusList = false } = {}) {
-    tab = name;
-    tabs.forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
-    if (name === "recent") return showList(recent, "Recently watched", "Nothing watched yet.", focusList);
-    if (name === "saved") return showList(saved, "Saved", "Swipe → on a video to save it.", focusList);
-    showList([], "Trending", "", false);
+  // Loads a list of videos into the list area, ignoring results that arrive after the user moved on.
+  let loadSeq = 0;
+  async function loadVideos(path, label, emptyText, { focus = false, backTo = null } = {}) {
+    const seq = ++loadSeq;
+    back = backTo;
+    showList([], label, "", false);
     setStatus("Loading…", "busy");
     try {
-      const { videos: found } = await api("api/trending");
-      if (tab !== "hot") return;
+      const { videos: found } = await api(path);
+      if (seq !== loadSeq) return;
       setStatus("");
-      showList(found, "Trending now", "Nothing trending right now.", focusList);
+      showList(found, label, emptyText, focus);
     } catch (err) {
-      if (tab === "hot") setStatus(err.message, "error");
+      if (seq === loadSeq) setStatus(err.message, "error");
     }
+  }
+
+  function loadTab(name, { focusList = false } = {}) {
+    cancelSignIn();
+    tab = name;
+    back = null;
+    tabs.forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+    if (name === "hot") return loadVideos("api/trending", "Trending now", "Nothing trending right now.", { focus: focusList });
+    if (name === "subs") {
+      if (!session) {
+        return showMenu("Subscriptions", signInEntries("Sign in to see your subscriptions"), focusList);
+      }
+      return loadVideos("api/me/subs", "New from your subscriptions", "No recent uploads.", { focus: focusList });
+    }
+    if (name === "library") return showLibrary(focusList);
   }
 
   async function runSearch() {
     const q = searchEl.value.trim();
     if (!q) return;
     searchEl.blur();
+    cancelSignIn();
     tab = "search";
     tabs.forEach((t) => t.classList.remove("active"));
-    showList([], `“${q}”`, "", false);
-    setStatus("Searching…", "busy");
+    await loadVideos(`api/search?q=${encodeURIComponent(q)}`, `“${q}”`, "No videos found.", { focus: true });
+    if (!videos.length) searchEl.focus();
+  }
+
+  // --- Library & account -------------------------------------------------------
+
+  function signInEntries(sub) {
+    if (!signInAvailable) return [{ icon: "👤", title: "Google sign-in isn't set up", sub: "Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server" }];
+    return [{ icon: "👤", title: "Sign in with Google", sub, run: startSignIn }];
+  }
+
+  async function showLibrary(focusList, focusIndex = 0) {
+    const entries = [
+      { icon: "🕘", title: "Recent", sub: `${recent.length} watched`, run: () => showVideoList(recent, "Recently watched", "Nothing watched yet.") },
+      { icon: "★", title: "Saved", sub: `${saved.length} saved · swipe → on a video to save`, run: () => showVideoList(saved, "Saved", "Swipe → on a video to save it.") },
+    ];
+    if (!session) {
+      showMenu("Library", [...entries, ...signInEntries("See your playlists and liked videos")], focusList, focusIndex);
+      return;
+    }
+    entries.push({ icon: "👍", title: "Liked videos", sub: "Videos you've liked", run: () => loadVideos("api/me/liked", "Liked videos", "No liked videos.", { focus: true, backTo: returnToLibrary }) });
+    const accountEntry = {
+      icon: "👤",
+      title: accountName ? `Signed in as ${accountName}` : "Signed in",
+      sub: "Pinch twice to sign out",
+      confirm: true,
+      run: signOut,
+    };
+    showMenu("Library", [...entries, accountEntry], focusList, focusIndex);
+    // Playlists load in after the fixed entries.
+    const seq = loadSeq;
     try {
-      const { videos: found } = await api(`api/search?q=${encodeURIComponent(q)}`);
-      if (tab !== "search") return;
-      setStatus("");
-      showList(found, `“${q}”`, "No videos found.", true);
+      const { playlists } = await api("api/me/playlists");
+      if (seq !== loadSeq || tab !== "library" || !menu) return;
+      const lists = playlists.map((pl) => ({
+        icon: "📂",
+        title: pl.title,
+        sub: `${pl.count} videos`,
+        run: () => loadVideos(`api/me/playlist?id=${encodeURIComponent(pl.id)}`, pl.title, "This playlist is empty.", { focus: true, backTo: returnToLibrary }),
+      }));
+      const focused = [...listEl.children].indexOf(document.activeElement);
+      showMenu("Library", [...entries, ...lists, accountEntry], false);
+      if (focused >= 0) listEl.children[Math.min(focused, listEl.children.length - 1)].focus();
     } catch (err) {
       setStatus(err.message, "error");
-      searchEl.focus();
     }
+  }
+
+  function returnToLibrary() {
+    const index = Math.max(0, lastMenuIndex);
+    showLibrary(true, index);
+  }
+
+  function showVideoList(list, label, emptyText) {
+    back = returnToLibrary;
+    showList(list, label, emptyText, true);
+  }
+
+  // --- Google sign-in: a code on the glasses, approved on your phone ------------
+
+  let signIn = null; // { deviceCode, timer }
+
+  async function startSignIn() {
+    cancelSignIn();
+    setStatus("Getting a code…", "busy");
+    try {
+      const start = await api("api/auth/start", { method: "POST", body: "{}" });
+      signIn = { deviceCode: start.deviceCode, interval: start.interval, until: Date.now() + start.expiresIn * 1000, timer: null };
+      listEl.replaceChildren();
+      listEl.hidden = true;
+      listTitleEl.textContent = "Sign in with Google";
+      emptyEl.hidden = true;
+      signinEl.hidden = false;
+      signinUrlEl.textContent = start.verificationUrl.replace(/^https?:\/\/(www\.)?/, "");
+      signinCodeEl.textContent = start.userCode;
+      signinNoteEl.textContent = "Waiting for you to approve… · back to cancel";
+      setStatus("");
+      document.activeElement?.blur();
+      scheduleSignInPoll();
+    } catch (err) {
+      setStatus(err.message, "error");
+    }
+  }
+
+  function scheduleSignInPoll() {
+    if (!signIn) return;
+    signIn.timer = setTimeout(pollSignIn, signIn.interval * 1000);
+  }
+
+  async function pollSignIn() {
+    if (!signIn) return;
+    if (Date.now() > signIn.until) {
+      signinNoteEl.textContent = "The code expired. Back, then try again.";
+      return;
+    }
+    try {
+      const r = await api("api/auth/poll", { method: "POST", body: JSON.stringify({ deviceCode: signIn.deviceCode }) });
+      if (!signIn) return;
+      if (r.session) {
+        signIn = null;
+        signinEl.hidden = true;
+        session = r.session;
+        store.set("googleSession", session);
+        api("api/me").then(({ name }) => { accountName = name; store.set("accountName", name); }).catch(() => {});
+        await loadTab("subs", { focusList: true });
+        setStatus("Signed in ✓");
+        return;
+      }
+      if (r.denied) { signinNoteEl.textContent = "Sign-in was declined. Back to return."; return; }
+      if (r.expired) { signinNoteEl.textContent = `${r.error || "Sign-in failed"}. Back, then try again.`; return; }
+      if (r.slowDown) signIn.interval += 5;
+    } catch (err) {
+      signinNoteEl.textContent = `${err.message} · retrying…`;
+    }
+    scheduleSignInPoll();
+  }
+
+  function cancelSignIn() {
+    if (signIn) clearTimeout(signIn.timer);
+    signIn = null;
+    signinEl.hidden = true;
+    listEl.hidden = false;
+  }
+
+  function signOutLocally() {
+    session = "";
+    accountName = "";
+    store.set("googleSession", "");
+    store.set("accountName", "");
+  }
+
+  async function signOut() {
+    await api("api/auth/signout", { method: "POST", body: "{}" }).catch(() => {});
+    signOutLocally();
+    setStatus("Signed out");
+    showLibrary(true);
   }
 
   // --- List ------------------------------------------------------------------
 
   function showList(list, label, emptyText, focusFirst) {
     videos = list;
-    listLabel = label;
+    menu = null;
+    signinEl.hidden = true;
+    listEl.hidden = false;
     listTitleEl.textContent = label;
     emptyEl.hidden = list.length > 0 || !emptyText;
     emptyEl.textContent = emptyText;
     listEl.replaceChildren(...list.map(renderItem));
     if (focusFirst && list.length) listEl.children[0].focus();
+  }
+
+  let lastMenuIndex = 0;
+  function showMenu(label, entries, focusFirst, focusIndex = 0) {
+    videos = [];
+    menu = entries;
+    signinEl.hidden = true;
+    listEl.hidden = false;
+    listTitleEl.textContent = label;
+    emptyEl.hidden = true;
+    listEl.replaceChildren(...entries.map(renderEntry));
+    if (focusFirst && entries.length) {
+      const el = listEl.children[Math.min(focusIndex, entries.length - 1)];
+      el.focus();
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function renderEntry(entry, i) {
+    const item = document.createElement("button");
+    item.className = "focusable item entry";
+    const icon = document.createElement("span");
+    icon.className = "icon-box";
+    icon.textContent = entry.icon;
+    const text = document.createElement("span");
+    text.className = "text";
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = entry.title;
+    const c = document.createElement("span");
+    c.className = "c";
+    c.textContent = entry.sub || "";
+    text.append(t, c);
+    item.append(icon, text);
+    item.addEventListener("focus", () => setStatus(""));
+    item.addEventListener("blur", () => {
+      if (entry.confirm) { item.classList.remove("confirm"); c.textContent = entry.sub || ""; }
+    });
+    item.addEventListener("click", () => {
+      if (!entry.run) return;
+      if (entry.confirm && !item.classList.contains("confirm")) {
+        item.classList.add("confirm");
+        c.textContent = "Pinch again to confirm";
+        return;
+      }
+      lastMenuIndex = i;
+      entry.run();
+    });
+    return item;
   }
 
   function renderItem(v, i) {
@@ -163,14 +369,8 @@
     const nowSaved = !isSaved(v.id);
     saved = nowSaved ? [v, ...saved].slice(0, 100) : saved.filter((s) => s.id !== v.id);
     store.set("saved", saved);
-    if (tab === "saved") {
-      showList(saved, "Saved", "Swipe → on a video to save it.", false);
-      const next = listEl.children[Math.min(i, listEl.children.length - 1)];
-      (next || tabs[2]).focus();
-    } else {
-      listEl.children[i].replaceWith(renderItem(v, i));
-      listEl.children[i].focus();
-    }
+    listEl.children[i].replaceWith(renderItem(v, i));
+    listEl.children[i].focus();
     setStatus(nowSaved ? "★ Saved" : "Removed"); // after focus, which shows the hint
   }
 
@@ -282,7 +482,6 @@
     view = "home";
     playerEl.hidden = true;
     homeEl.hidden = false;
-    if (tab === "recent") showList(recent, "Recently watched", "Nothing watched yet.", false);
     const item = listEl.children[Math.min(current, listEl.children.length - 1)];
     (item || searchEl).focus();
   }
@@ -304,7 +503,7 @@
       case "ArrowRight": {
         e.preventDefault();
         if (itemIndex >= 0) {
-          if (e.key === "ArrowRight") toggleSave(itemIndex);
+          if (e.key === "ArrowRight" && !menu) toggleSave(itemIndex);
           return;
         }
         const next = Math.max(0, Math.min(topRow.length - 1, (rowIndex < 0 ? 0 : rowIndex) + (e.key === "ArrowLeft" ? -1 : 1)));
@@ -331,6 +530,17 @@
           const activeTab = tabs.find((t) => t.classList.contains("active"));
           (activeTab || searchEl).focus();
           setStatus("");
+        }
+        break;
+      case "Escape":
+        // Back gesture: leave the sign-in screen or a sub-list; at the top level, exit as usual.
+        if (signIn || !signinEl.hidden) {
+          e.preventDefault();
+          cancelSignIn();
+          loadTab(tab === "subs" ? "subs" : "library", { focusList: true });
+        } else if (back) {
+          e.preventDefault();
+          back();
         }
         break;
       case "Enter":
@@ -390,6 +600,10 @@
   });
 
   // --- Start -----------------------------------------------------------------
+  fetch("api/health")
+    .then((r) => r.json())
+    .then((h) => { signInAvailable = Boolean(h.signIn); if (tab !== "hot" && menu) loadTab(tab); })
+    .catch(() => {});
   loadTab("hot");
   searchEl.focus();
 

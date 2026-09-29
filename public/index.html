@@ -19,13 +19,20 @@
     <div class="top">
       <textarea id="search" class="focusable" rows="1" placeholder="Search…" aria-label="Search YouTube"></textarea>
       <button id="tabHot" class="focusable tab" data-tab="hot"><span class="ico">🔥</span><span class="lbl">Hot</span></button>
-      <button id="tabRecent" class="focusable tab" data-tab="recent"><span class="ico">🕘</span><span class="lbl">Recent</span></button>
-      <button id="tabSaved" class="focusable tab" data-tab="saved"><span class="ico">★</span><span class="lbl">Saved</span></button>
+      <button id="tabSubs" class="focusable tab" data-tab="subs"><span class="ico">📺</span><span class="lbl">Subs</span></button>
+      <button id="tabLibrary" class="focusable tab" data-tab="library"><span class="ico">📚</span><span class="lbl">Library</span></button>
     </div>
 
     <p id="listTitle" class="list-title"></p>
     <div id="list" class="list"></div>
     <p id="empty" class="empty" hidden></p>
+    <div id="signin" class="signin" hidden>
+      <p class="s1">On your phone, go to</p>
+      <p id="signinUrl" class="s2">google.com/device</p>
+      <p class="s1">and enter this code:</p>
+      <p id="signinCode" class="code"></p>
+      <p id="signinNote" class="s3">Waiting for you to approve… · back to cancel</p>
+    </div>
   </div>
 
   <div id="player" class="player" tabindex="-1" hidden>
