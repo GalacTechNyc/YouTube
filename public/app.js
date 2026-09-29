@@ -414,7 +414,8 @@
     frame.style.height = `${q.h}px`;
     frame.style.transformOrigin = "0 0";
     frame.style.transform = `scale(${600 / q.w})`;
-    player.setSize(q.w, q.h);
+    // Never let a sizing problem stop playback from starting.
+    try { player.setSize?.(q.w, q.h); } catch { /* keep the CSS size */ }
   }
 
   function cycleQuality() {
